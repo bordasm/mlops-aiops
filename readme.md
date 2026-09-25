@@ -1,0 +1,1 @@
+This GitHub repo contains the files for the following Cubix course (https://cubixedu.com): AIOps & MLOps – AI Operations and Security.
