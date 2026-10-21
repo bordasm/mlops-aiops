@@ -1,0 +1,112 @@
+{
+  "best_model": "LightGBM",
+  "selection_metric": "r2",
+  "best_model_metrics": {
+    "train": {
+      "rmse": 1.475655992497352,
+      "mae": 1.1731986330856086,
+      "r2": 0.9098440033244417
+    },
+    "test": {
+      "rmse": 1.6704806257554707,
+      "mae": 1.3235855525591058,
+      "r2": 0.884597760318714
+    },
+    "time_seconds": 0.853
+  },
+  "all_models": {
+    "RandomForest": {
+      "train": {
+        "rmse": 0.8881351797385718,
+        "mae": 0.7107515645732628,
+        "r2": 0.9673425317286686
+      },
+      "test": {
+        "rmse": 1.7400394197840536,
+        "mae": 1.3748595155320673,
+        "r2": 0.8747869698221276
+      },
+      "time_seconds": 18.975
+    },
+    "XGBoost": {
+      "train": {
+        "rmse": 1.385373636195412,
+        "mae": 1.0978751338082535,
+        "r2": 0.9205382354852482
+      },
+      "test": {
+        "rmse": 1.6742021818360626,
+        "mae": 1.3245026792852153,
+        "r2": 0.8840829931301435
+      },
+      "time_seconds": 1.382
+    },
+    "LightGBM": {
+      "train": {
+        "rmse": 1.475655992497352,
+        "mae": 1.1731986330856086,
+        "r2": 0.9098440033244417
+      },
+      "test": {
+        "rmse": 1.6704806257554707,
+        "mae": 1.3235855525591058,
+        "r2": 0.884597760318714
+      },
+      "time_seconds": 0.853
+    }
+  },
+  "target_column": "coffee_quality_score",
+  "feature_columns": [
+    "harvest_season",
+    "harvest_calendar_year",
+    "harvest_month",
+    "country_of_origin",
+    "farm_type",
+    "farm_size_hectares",
+    "tree_age_years",
+    "altitude_mean_meters",
+    "species",
+    "avg_temp_c",
+    "avg_annual_rainfall_mm",
+    "humidity_pct",
+    "processing_method",
+    "drying_method",
+    "drying_duration_days",
+    "storage_months",
+    "storage_conditions",
+    "bean_size_screen",
+    "moisture_pct",
+    "bean_density_g_ml",
+    "defect_rate_pct",
+    "traceability_level",
+    "certification",
+    "intended_buyer_segment",
+    "lot_size_kg",
+    "roast_level",
+    "acidity_score",
+    "sweetness_score",
+    "body_score",
+    "aroma_score",
+    "flavor_score"
+  ],
+  "leakage_columns": [
+    "record_id",
+    "lot_id",
+    "quality_grade",
+    "price_usd_per_kg"
+  ],
+  "data_path": "c:\\D\\Work\\Ismeret\\AI_ML_DL_TL\\CUBIX_MLOPS_AIOPS\\coffeePricePredictor\\data\\coffee_value_benchmark.csv",
+  "train_rows": 28560,
+  "test_rows": 7140,
+  "test_size": 0.2,
+  "random_state": 42,
+  "trained_at": "2026-10-21T13:17:50.522476+00:00",
+  "library_versions": {
+    "pandas": "2.1.4",
+    "numpy": "1.26.4",
+    "scikit-learn": "1.4.2",
+    "xgboost": "3.1.2",
+    "lightgbm": "4.6.0",
+    "joblib": "1.3.2"
+  }
+}

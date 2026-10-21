@@ -1,0 +1,58 @@
+artifact_path: file:///c:/D/Work/Ismeret/AI_ML_DL_TL/CUBIX_MLOPS_AIOPS/coffeePricePredictor/artifacts/mlruns/coffee-quality-training/models/m-c46f343e2cf64aac92482519645a037d/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.11.9
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.4.2
+    skops_trusted_types: null
+is_signature_from_type_hint: false
+mlflow_version: 3.17.0
+model_id: m-c46f343e2cf64aac92482519645a037d
+model_size_bytes: 1397736
+model_uuid: m-c46f343e2cf64aac92482519645a037d
+prompts: null
+run_id: 8c0ff762ce954ab5b6970bf54036816f
+saved_input_example_info:
+  artifact_path: input_example.json
+  pandas_orient: split
+  serving_input_path: serving_input_example.json
+  type: dataframe
+signature:
+  inputs: '[{"type": "string", "name": "harvest_season", "required": true}, {"type":
+    "double", "name": "harvest_calendar_year", "required": true}, {"type": "double",
+    "name": "harvest_month", "required": true}, {"type": "string", "name": "country_of_origin",
+    "required": true}, {"type": "string", "name": "farm_type", "required": true},
+    {"type": "double", "name": "farm_size_hectares", "required": true}, {"type": "double",
+    "name": "tree_age_years", "required": true}, {"type": "double", "name": "altitude_mean_meters",
+    "required": true}, {"type": "string", "name": "species", "required": true}, {"type":
+    "double", "name": "avg_temp_c", "required": true}, {"type": "double", "name":
+    "avg_annual_rainfall_mm", "required": true}, {"type": "double", "name": "humidity_pct",
+    "required": false}, {"type": "string", "name": "processing_method", "required":
+    true}, {"type": "string", "name": "drying_method", "required": true}, {"type":
+    "double", "name": "drying_duration_days", "required": true}, {"type": "double",
+    "name": "storage_months", "required": true}, {"type": "string", "name": "storage_conditions",
+    "required": true}, {"type": "double", "name": "bean_size_screen", "required":
+    true}, {"type": "double", "name": "moisture_pct", "required": true}, {"type":
+    "double", "name": "bean_density_g_ml", "required": true}, {"type": "double", "name":
+    "defect_rate_pct", "required": true}, {"type": "string", "name": "traceability_level",
+    "required": true}, {"type": "string", "name": "certification", "required": false},
+    {"type": "string", "name": "intended_buyer_segment", "required": true}, {"type":
+    "double", "name": "lot_size_kg", "required": true}, {"type": "string", "name":
+    "roast_level", "required": true}, {"type": "double", "name": "acidity_score",
+    "required": true}, {"type": "double", "name": "sweetness_score", "required": true},
+    {"type": "double", "name": "body_score", "required": true}, {"type": "double",
+    "name": "aroma_score", "required": true}, {"type": "double", "name": "flavor_score",
+    "required": true}]'
+  outputs: '[{"type": "tensor", "tensor-spec": {"dtype": "float32", "shape": [-1]}}]'
+  params: null
+type_hint_from_example: false
+utc_time_created: '2026-10-21 14:00:16.005758'

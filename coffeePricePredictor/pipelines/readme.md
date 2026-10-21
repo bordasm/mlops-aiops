@@ -1,0 +1,4 @@
+Pipeline Notebooks (Standalone)
+- coffee-quality-pricing-benchmark_training_pipeline.ipynb: Loads and validates the data, removes columns from which the model could "foresee" the outcome (identifiers, price, rating), and then performs a train/test split and preprocessing. It subsequently trains RandomForest, XGBoost, and LightGBM models, selecting the best one based on the test R² score. The model is saved to the `pipelines\artifacts` folder, reloaded, and verified to ensure it yields the same metrics.
+Best model: LightGBM, test R² = 0.8846. This matches the result obtained in `productionReadyCode`.
+- coffee-quality-pricing-benchmark_inference_pipeline.ipynb: Loads the saved model, validates the input (checking for missing columns or non-numeric values), and generates predictions. The results are written to `pipelines\output\coffee_quality_predictions.csv`. If the input also contains the target variable, an evaluation is performed.

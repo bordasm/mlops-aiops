@@ -1,0 +1,76 @@
+{
+  "best_model": "LightGBM",
+  "selection_metric": "test_r2",
+  "best_model_metrics": {
+    "train_rmse": 1.475655992497352,
+    "train_mae": 1.1731986330856086,
+    "train_r2": 0.9098440033244417,
+    "test_rmse": 1.6704806257554707,
+    "test_mae": 1.3235855525591058,
+    "test_r2": 0.884597760318714,
+    "fit_time_seconds": 1.524
+  },
+  "all_models": {
+    "RandomForest": {
+      "train_rmse": 0.8881351797385718,
+      "train_mae": 0.7107515645732629,
+      "train_r2": 0.9673425317286686,
+      "test_rmse": 1.7400394197840536,
+      "test_mae": 1.3748595155320673,
+      "test_r2": 0.8747869698221276,
+      "fit_time_seconds": 19.55
+    },
+    "XGBoost": {
+      "train_rmse": 1.385373636195412,
+      "train_mae": 1.0978751338082535,
+      "train_r2": 0.9205382354852482,
+      "test_rmse": 1.6742021818360626,
+      "test_mae": 1.3245026792852153,
+      "test_r2": 0.8840829931301435,
+      "fit_time_seconds": 2.27
+    },
+    "LightGBM": {
+      "train_rmse": 1.475655992497352,
+      "train_mae": 1.1731986330856086,
+      "train_r2": 0.9098440033244417,
+      "test_rmse": 1.6704806257554707,
+      "test_mae": 1.3235855525591058,
+      "test_r2": 0.884597760318714,
+      "fit_time_seconds": 1.524
+    }
+  },
+  "feature_columns": [
+    "harvest_season",
+    "harvest_calendar_year",
+    "harvest_month",
+    "country_of_origin",
+    "farm_type",
+    "farm_size_hectares",
+    "tree_age_years",
+    "altitude_mean_meters",
+    "species",
+    "avg_temp_c",
+    "avg_annual_rainfall_mm",
+    "humidity_pct",
+    "processing_method",
+    "drying_method",
+    "drying_duration_days",
+    "storage_months",
+    "storage_conditions",
+    "bean_size_screen",
+    "moisture_pct",
+    "bean_density_g_ml",
+    "defect_rate_pct",
+    "traceability_level",
+    "certification",
+    "intended_buyer_segment",
+    "lot_size_kg",
+    "roast_level",
+    "acidity_score",
+    "sweetness_score",
+    "body_score",
+    "aroma_score",
+    "flavor_score"
+  ],
+  "best_model_uri": "models:/m-97970f9d41e044ffaa935726a3cb9c80"
+}
