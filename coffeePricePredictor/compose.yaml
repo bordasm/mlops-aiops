@@ -59,6 +59,47 @@ services:
       timeout: 15s
       retries: 5
 
+  airflow:
+    image: coffee-airflow:local
+    build:
+      context: ./airflow
+    init: true
+    restart: unless-stopped
+    command: standalone
+    environment:
+      AIRFLOW_HOME: /opt/airflow/state
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: Europe/Budapest
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__PARALLELISM: "2"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "admin:admin"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "false"
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://localhost:8080/execution/
+      AIRFLOW__WORKERS__EXECUTION_API_TIMEOUT: "60"
+      AIRFLOW__API__BASE_URL: http://localhost:8080
+      AIRFLOW__METRICS__OTEL_ON: "false"
+      COFFEE_API_URL: http://api:8000
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - airflow-state:/opt/airflow/state
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          airflow jobs check --job-type SchedulerJob --local
+          && airflow jobs check --job-type DagProcessorJob --local
+          && python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/v2/monitor/health', timeout=10)"
+      interval: 60s
+      timeout: 45s
+      start_period: 120s
+      retries: 5
+
   dashboard:
     <<: *coffee-service
     command:
@@ -95,3 +136,4 @@ services:
 volumes:
   mlflow-data:
   monitoring-reports:
+  airflow-state:

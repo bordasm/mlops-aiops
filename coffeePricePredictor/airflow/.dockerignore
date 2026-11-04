@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!dags/
+!dags/*.py
+!tests/
+!tests/*.py
