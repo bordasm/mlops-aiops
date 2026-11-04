@@ -82,7 +82,7 @@ class ServiceTests(unittest.TestCase):
                     patch.object(config, "ARTIFACTS_DIR", root),
                     patch.object(config, "MLRUNS_DIR", root / "mlruns"),
                     patch(
-                        "coffee_mlflow_api.service.build_models",
+                        "coffee_mlflow_api.training.build_models",
                         return_value={"RandomForest": RandomForestRegressor(
                             n_estimators=3, max_depth=3, random_state=42,
                         )},

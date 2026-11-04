@@ -4,24 +4,28 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
 import pandas as pd
 import xgboost as xgb
 import lightgbm as lgb
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+from coffee_price_predictor.metrics import evaluate_predictions
 
 
 def build_preprocessor(
     features: pd.DataFrame,
 ) -> ColumnTransformer:
     """Create a preprocessing pipeline for numeric and categorical columns."""
-    numerical_columns = features.select_dtypes(include=["number"]).columns.tolist()
-    categorical_columns = features.select_dtypes(exclude=["number"]).columns.tolist()
+    numerical_columns = (
+        features.select_dtypes(include=["number"]).columns.tolist()
+    )
+    categorical_columns = (
+        features.select_dtypes(exclude=["number"]).columns.tolist()
+    )
 
     if not numerical_columns:
         raise ValueError("No numeric columns were found in the feature set.")
@@ -76,16 +80,4 @@ def build_models() -> dict[str, Any]:
             random_state=42,
             verbose=-1,
         ),
-    }
-
-
-def evaluate_predictions(
-    y_true: pd.Series,
-    y_pred: np.ndarray,
-) -> dict[str, float]:
-    """Compute regression metrics for a prediction set."""
-    return {
-        "rmse": float(np.sqrt(mean_squared_error(y_true, y_pred))),
-        "mae": float(mean_absolute_error(y_true, y_pred)),
-        "r2": float(r2_score(y_true, y_pred)),
     }

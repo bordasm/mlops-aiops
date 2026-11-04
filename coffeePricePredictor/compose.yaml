@@ -1,60 +1,145 @@
 name: coffee-quality
 
-x-coffee-service: &coffee-service
-  image: coffee-quality:local
-  build:
-    context: .
-    dockerfile: docker/Dockerfile
-  init: true
-  restart: unless-stopped
+x-ml-environment: &ml-environment
+  MLFLOW_TRACKING_URI: http://mlflow:5000
 
 services:
+  mlflow-db:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mlflow
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: ${MLFLOW_DB_PASSWORD:?Set MLFLOW_DB_PASSWORD in .env}
+    volumes:
+      - mlflow-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlflow -d mlflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mlflow:
+    image: coffee-mlflow:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: mlflow
+    init: true
+    restart: unless-stopped
+    environment:
+      MLFLOW_DB_PASSWORD: ${MLFLOW_DB_PASSWORD:?Set MLFLOW_DB_PASSWORD in .env}
+    command:
+      - sh
+      - -ec
+      - >-
+        exec mlflow server
+        --backend-store-uri "postgresql+psycopg2://mlflow:$${MLFLOW_DB_PASSWORD}@mlflow-db:5432/mlflow"
+        --artifacts-destination /app/mlflow-artifacts
+        --serve-artifacts
+        --host 0.0.0.0 --port 5000 --workers 1
+        --allowed-hosts "mlflow:5000,mlflow,localhost:5000,localhost,127.0.0.1:5000,127.0.0.1"
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - mlflow-http-artifacts:/app/mlflow-artifacts
+    depends_on:
+      mlflow-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=10)"]
+      interval: 15s
+      timeout: 15s
+      start_period: 60s
+      retries: 10
+
   api:
-    <<: *coffee-service
+    image: coffee-inference:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: inference
+    init: true
+    restart: unless-stopped
+    environment: *ml-environment
     ports:
       - "127.0.0.1:8000:8000"
-    volumes:
-      - mlflow-data:/app/artifacts
+    depends_on:
+      mlflow:
+        condition: service_healthy
     healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=30)"
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=30)"]
       interval: 30s
       timeout: 40s
       start_period: 60s
       retries: 5
 
-  mlflow:
-    <<: *coffee-service
-    command:
-      - mlflow
-      - server
-      - --backend-store-uri
-      - sqlite:////app/artifacts/mlflow.db
-      - --default-artifact-root
-      - file:///app/artifacts/mlruns
-      - --no-serve-artifacts
-      - --host
-      - 0.0.0.0
-      - --port
-      - "5000"
-      - --workers
-      - "1"
-    ports:
-      - "127.0.0.1:5000:5000"
+  training-worker:
+    image: coffee-training:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: training
+    init: true
+    restart: unless-stopped
+    environment: *ml-environment
+    command: ["python", "-m", "coffee_mlflow_api.worker"]
     volumes:
-      - mlflow-data:/app/artifacts
+      - training-jobs:/app/jobs
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; from coffee_mlflow_api.jobs import JobStore; assert JobStore(Path('/app/jobs/training.db')).worker_ready()"]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+
+  training-api:
+    image: coffee-training:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: training
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8001:8001"
+    volumes:
+      - training-jobs:/app/jobs
+    depends_on:
+      training-worker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=10)"]
+      interval: 15s
+      timeout: 15s
+      retries: 5
+
+  dashboard:
+    image: coffee-dashboard:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: dashboard
+    init: true
+    restart: unless-stopped
+    environment:
+      COFFEE_API_URL: http://api:8000
+      COFFEE_TRAINING_URL: http://training-api:8001
+      COFFEE_MLFLOW_UI_URL: http://localhost:5000
+    ports:
+      - "127.0.0.1:8501:8501"
+    volumes:
+      - monitoring-reports:/app/reports
     depends_on:
       api:
         condition: service_healthy
+      training-api:
+        condition: service_healthy
     healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=10)"
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=10)"]
       interval: 30s
       timeout: 15s
       retries: 5
@@ -81,12 +166,13 @@ services:
       AIRFLOW__API__BASE_URL: http://localhost:8080
       AIRFLOW__METRICS__OTEL_ON: "false"
       COFFEE_API_URL: http://api:8000
+      COFFEE_TRAINING_URL: http://training-api:8001
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
       - airflow-state:/opt/airflow/state
     depends_on:
-      api:
+      training-api:
         condition: service_healthy
     healthcheck:
       test:
@@ -100,40 +186,9 @@ services:
       start_period: 120s
       retries: 5
 
-  dashboard:
-    <<: *coffee-service
-    command:
-      - python
-      - -m
-      - streamlit
-      - run
-      - dashboard/app.py
-      - --server.address=0.0.0.0
-      - --server.port=8501
-      - --server.maxUploadSize=20
-      - --server.headless=true
-    environment:
-      COFFEE_API_URL: http://api:8000
-      COFFEE_REPORTS_DIR: /app/reports
-      COFFEE_MLFLOW_UI_URL: http://localhost:5000
-    ports:
-      - "127.0.0.1:8501:8501"
-    volumes:
-      - monitoring-reports:/app/reports
-    depends_on:
-      api:
-        condition: service_healthy
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=10)"
-      interval: 30s
-      timeout: 15s
-      retries: 5
-
 volumes:
-  mlflow-data:
+  mlflow-postgres:
+  mlflow-http-artifacts:
+  training-jobs:
   monitoring-reports:
   airflow-state:

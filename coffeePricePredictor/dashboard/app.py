@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
@@ -30,6 +31,9 @@ REPORTS_DIR = Path(os.environ.get(
     "COFFEE_REPORTS_DIR", PROJECT_ROOT / "artifacts" / "reports",
 ))
 API_URL = os.environ.get("COFFEE_API_URL", "http://127.0.0.1:56")
+TRAINING_URL = os.environ.get(
+    "COFFEE_TRAINING_URL", "http://127.0.0.1:8001",
+)
 MLFLOW_UI_URL = os.environ.get(
     "COFFEE_MLFLOW_UI_URL", "http://localhost:5000",
 )
@@ -75,40 +79,69 @@ def display_report(result: MonitoringResult, title: str) -> None:
             )
 
 
-def show_training(client: CoffeeApiClient, is_training: bool) -> None:
-    """Launch training explicitly and compare the returned candidates."""
+def show_training(client: CoffeeApiClient) -> None:
+    """Submit idempotent jobs without waiting on the training HTTP request."""
     st.subheader("Train and compare candidate models")
     st.caption(
         "Training uses the full configured benchmark and updates the "
         "champion alias. It can take several minutes."
     )
+    try:
+        health = client.request("GET", "/health")
+        jobs = client.request("GET", "/jobs")["jobs"]
+    except ApiError as error:
+        st.error(f"Training service unavailable: {error}")
+        return
+    if jobs:
+        st.dataframe(pd.DataFrame([
+            {
+                "job_id": job["job_id"], "status": job["status"],
+                "created_at": job["created_at"], "error": job["error"],
+            }
+            for job in jobs
+        ]), hide_index=True)
+        selected = st.selectbox(
+            "Training job", [job["job_id"] for job in jobs],
+        )
+        job = next(job for job in jobs if job["job_id"] == selected)
+        st.session_state.pop("training_result", None)
+        if job["status"] == "failed":
+            st.error(job["error"])
+        elif job["status"] in ("queued", "running"):
+            st.info(f"Job {selected}: {job['status']}. Refresh to update.")
+        elif job["status"] == "succeeded":
+            st.session_state["training_result"] = job["result"]
     with st.form("training"):
         test_size = st.slider("Test fraction", 0.05, 0.5, 0.2, 0.05)
         random_state = st.number_input(
             "Random seed", min_value=0, max_value=2**32 - 1, value=42,
         )
         submitted = st.form_submit_button(
-            "Train models", disabled=is_training,
+            "Train models", disabled=health["training_in_progress"],
         )
     if submitted:
         try:
-            with st.spinner("Training models via the REST API..."):
-                result = client.request(
-                    "POST", "/train", timeout=1800,
+            request_id = st.session_state.setdefault(
+                "training_request_id", str(uuid4()),
+            )
+            with st.spinner("Submitting durable training job..."):
+                job = client.request(
+                    "POST", "/jobs",
                     json={
                         "test_size": test_size,
                         "random_state": random_state,
+                        "request_id": request_id,
                     },
                 )
-            st.session_state["training_result"] = result
-            for key in (
-                "prediction_result", "data_report", "regression_report",
-            ):
-                st.session_state.pop(key, None)
-            st.success(result["message"])
+            st.session_state.pop("training_request_id", None)
+            st.success(f"Training job accepted: {job['job_id']}")
             st.rerun()
         except ApiError as error:
             st.error(str(error))
+            st.warning(
+                "The request key is retained. Retry with the same parameters "
+                "to recover an accepted job without duplicating training."
+            )
     result = st.session_state.get("training_result")
     if result:
         st.caption(
@@ -276,6 +309,7 @@ def main() -> None:
     st.set_page_config(page_title="Coffee Quality Monitor", layout="wide")
     st.title("Coffee Quality Monitor")
     st.sidebar.caption(f"API: {API_URL}")
+    st.sidebar.caption(f"Training: {TRAINING_URL}")
     st.sidebar.link_button("MLflow experiments and registry", MLFLOW_UI_URL)
     st.sidebar.button("Refresh status")
     client = CoffeeApiClient(API_URL)
@@ -283,16 +317,14 @@ def main() -> None:
         health = client.request("GET", "/health")
     except ApiError as error:
         st.error(str(error))
+        show_training(CoffeeApiClient(TRAINING_URL))
         show_saved_reports()
         return
-    left, middle, right = st.columns(3)
+    left, middle = st.columns(2)
     left.metric("API", health["status"])
     middle.metric(
         "Champion",
         "Available" if health["champion_model_available"] else "None",
-    )
-    right.metric(
-        "Training", "Running" if health["training_in_progress"] else "Idle",
     )
     model = None
     if health["champion_model_available"]:
@@ -318,7 +350,7 @@ def main() -> None:
         ["Training", "Inference and monitoring", "Saved reports"],
     )
     with training:
-        show_training(client, health["training_in_progress"])
+        show_training(CoffeeApiClient(TRAINING_URL))
     with inference:
         try:
             reference = load_reference(

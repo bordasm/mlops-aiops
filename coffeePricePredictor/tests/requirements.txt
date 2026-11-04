@@ -1,2 +1,4 @@
 -r ../docker/requirements.txt
 pycodestyle==2.14.0
+autopep8==2.3.2
+httpx==0.28.1

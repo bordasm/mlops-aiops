@@ -1,273 +1,284 @@
-# Coffee quality: Docker, Streamlit, Evidently and Airflow
+# Coffee quality microservices
 
-The application predicts **`coffee_quality_score`**, not a coffee price.
-The Docker stack reuses the existing MLflow REST API and the training
-utilities in `productionReadyCode/src`. The notebooks remain unchanged.
+The application predicts **`coffee_quality_score`**, not price.
+Training, serving and the monitoring UI are independently built/deployed
+services. They communicate through HTTP; neither serving nor training opens
+the MLflow database or mounts its artifact filesystem.
 
-## Start with Docker Compose
+## Architecture
 
-Requirements: Docker Desktop or Rancher Desktop running **Linux containers**,
-Docker Compose, and enough memory for three model candidates and monitoring.
-The first build downloads Python dependencies and can take several minutes.
+```text
+Streamlit/Evidently ---- GET /model, POST /predict ----> Inference API
+       |
+       +---- POST /jobs, GET /jobs/{id} ----> Training API
+                                              |
+                                  service-owned durable job store
+                                              |
+Airflow ---- POST /jobs, poll status ----> Training worker
+                                              |
+Inference API ------ MLflow HTTP ------> MLflow service <--- Training worker
+                                              |
+                                    PostgreSQL + artifact volume
+```
 
+| Component | Image / responsibility | Local address |
+| --- | --- | --- |
+| `api` | `coffee-inference:local`: prediction only, no training code/data | <http://localhost:8000/docs> |
+| `training-api` | `coffee-training:local`: durable asynchronous job API | <http://localhost:8001/docs> |
+| `training-worker` | `coffee-training:local`: isolated training processes | No published port |
+| `dashboard` | `coffee-dashboard:local`: Streamlit/Evidently, no model loading | <http://localhost:8501> |
+| `mlflow` | `coffee-mlflow:local`: registry, tracking, HTTP artifacts | <http://localhost:5000> |
+| `mlflow-db` | PostgreSQL, exclusively owned by MLflow | No published port |
+| `airflow` | `coffee-airflow:local`: daily orchestration | <http://localhost:8080> |
+
+Images use separate Docker build targets; only ML-library base layers are
+shared between training and inference. Airflow has its own official image.
+Services run as non-root except for the PostgreSQL image's standard bootstrap.
+All published HTTP ports are bound to host loopback.
+
+## Start
+
+Requirements: running Docker/Moby Linux engine (Docker Desktop/Rancher Desktop)
+and Docker Compose. Allow sufficient memory for training, Streamlit and Airflow.
 From this directory in PowerShell:
 
 ```powershell
+# Once: generates a cryptographically random password into ignored local .env.
+# Preserves an existing .env and never prints its password.
+& .\docker\initialize.ps1
 docker compose up --build -d
 docker compose ps
-docker compose logs -f api dashboard mlflow
 ```
 
-| Service | Address |
-| --- | --- |
-| Streamlit dashboard | <http://localhost:8501> |
-| REST API / Swagger | <http://localhost:8000/docs> |
-| MLflow experiments and registry | <http://localhost:5000> |
-| Airflow daily retraining | <http://localhost:8080> |
+`MLFLOW_DB_PASSWORD` is mandatory. The generated value is URL-safe hexadecimal.
+Keep `.env` private and backed up; it is not included in images or committed.
+Do not change the database password in `.env` for an initialized PostgreSQL
+volume without also rotating the PostgreSQL user's password.
 
-1. Open Streamlit. A new model store initially has **no champion**. Airflow can
-   perform its first daily training automatically for the latest due slot.
-2. For manual training, wait until the API is idle. On **Training**, select the
-   test fraction and random seed, then select **Train models**.
-   RandomForest, XGBoost and LightGBM are trained by the API.
-   The best test R-squared selects the registered `champion`.
-3. Review the model metadata, train/test metrics and candidate comparison.
-   The last dashboard training comparison is kept in the browser session;
-   the complete durable history is available in MLflow.
-4. On **Inference and monitoring**, download the sample CSV or upload your
-   own UTF-8 CSV containing the 31 model features. Select **Predict CSV**.
-   Predictions and their MLflow run ID appear, with a CSV download.
-5. Generate **Evidently data drift and quality** independently of inference.
-   After prediction, a CSV with at least two known `coffee_quality_score`
-   labels also supports the **Evidently regression report**.
-6. Reports are embedded in Streamlit and downloadable as HTML or JSON.
-   **Saved reports** lists previous reports, including after container restarts.
+If Rancher is running but Windows `docker info` fails, its Windows named-pipe
+integration may be unavailable. Repair that integration for normal PowerShell
+commands. The Linux engine can be checked without changing global settings:
 
-Manual training and report generation are explicit button actions: refreshing
-the page does not repeat training, inference or report creation. Airflow also
-retrains once per day as described below. Use **Refresh
-status** to pick up externally completed training. Uploaded CSVs are limited
-to 20 MB, matching the API. Training requests have a 30-minute client timeout;
-if a timeout occurs, the API may still be training. Refresh status before retrying.
-Changing the input, reference file or champion clears stale dashboard results.
+```powershell
+wsl --distribution rancher-desktop --exec docker info
+```
 
-## Persistent storage and compatibility
+If Rancher's Linux Compose plugin is not discovered automatically, use its
+bundled executable from this directory (default Rancher installation):
 
-Compose creates two named volumes (prefixed by `coffee-quality`):
+```powershell
+$compose = "/mnt/c/Program Files/Rancher Desktop/resources/resources/linux/docker-cli-plugins/docker-compose"
+wsl --distribution rancher-desktop --cd (Get-Location).Path --exec $compose up --build -d
+```
 
-- `mlflow-data`: `/app/artifacts/mlflow.db` and `/app/artifacts/mlruns`;
-  shared by the API and MLflow UI at the **same Linux absolute path**.
-- `monitoring-reports`: `/app/reports`, containing Evidently HTML/JSON outputs.
-- `airflow-state`: `/opt/airflow/state`, containing Airflow's SQLite metadata,
-  scheduler state, task logs and generated local login credentials.
+The first start creates an empty **new** central registry. Airflow may submit
+the latest due training job immediately. Until a champion exists, prediction
+returns HTTP 503; the service itself is healthy.
 
-The host's existing [artifacts](artifacts/) are **not mounted, copied,
-migrated or modified**. They contain Windows absolute artifact URIs that
-are not portable to Linux. The container starts with a separate empty
-registry; its first model is trained by Airflow, the dashboard or `POST /train`.
-Host notebook training still writes to the original host store and does
-not update the container's champion.
+## Existing data and migration
 
-The image excludes notebooks, existing models, the host SQLite database
-and unrelated files. It contains the API, reusable training code, dashboard,
-benchmark CSV and inference sample. Services run as a non-root user.
-Only the four HTTP ports are published, all bound to host loopback.
+The old `mlflow-data` volume and the host [artifacts](artifacts/) are **not**
+mounted, migrated or deleted. Host notebooks still use their original local
+store; they do not update the microservice registry. Retrain to populate the
+new registry. Existing monitoring reports and Airflow state retain their
+original volume names. The prior monolithic image is no longer used by Compose.
+
+New service-owned volumes:
+
+- `mlflow-postgres`: MLflow metadata and model registry.
+- `mlflow-http-artifacts`: only MLflow mounts this volume; clients upload and
+  download through its artifact HTTP endpoints (`mlflow-artifacts:` URIs).
+- `training-jobs`: only the training API and worker mount this SQLite job store.
+- `monitoring-reports`: only the dashboard mounts report HTML/JSON files.
+- `airflow-state`: Airflow metadata, task logs and generated login credentials.
 
 ```powershell
 docker compose stop
 docker compose start
-# Removes containers/network, but preserves models and reports:
 docker compose down
 ```
 
-Do **not** add `--volumes` to `docker compose down` unless you deliberately
-want to delete all container training history, models, reports and Airflow
-state. Back up all three named volumes while the services are stopped.
+These commands preserve volumes. **Do not use `down --volumes`** unless deletion
+of the new system's models, jobs, reports and scheduler history is intended.
+Back up the volumes and `.env` with the relevant services stopped.
+No automated deletion or migration of the old volume is performed.
 
-The SQLite deployment uses one API worker and one MLflow worker, suitable
-for this local application. The existing in-process training lock prevents
-concurrent training within that API. It is not a distributed lock: do not
-scale API workers or train concurrently from separate processes against
-the same store. Multi-host production deployment would require a shared
-database, artifact service, authentication, TLS and distributed job control.
-Do not expose these unauthenticated local services to a public network.
+## Asynchronous training
 
-## Daily retraining with Airflow
+The inference API exposes `/health`, `/model` and `/predict` only.
+**Breaking container API change:** `POST http://localhost:8000/train` is removed.
+Submit a job to the independent training API instead:
 
-`docker compose up --build -d` also starts an independent
-**Apache Airflow 3.3.2** container. The official image runs `airflow standalone`
-(API/UI, scheduler, DAG processor and local executor) with persistent SQLite
-state. This is a local, single-node setup, not a production Airflow cluster;
-Airflow's dependencies are deliberately isolated from the ML/Streamlit image.
-Native Windows Airflow installation is not supported or required.
+```powershell
+$request = @{
+    request_id = [guid]::NewGuid().ToString()
+    test_size = 0.2
+    random_state = 42
+} | ConvertTo-Json
+$job = Invoke-RestMethod -Method Post http://localhost:8001/jobs `
+    -ContentType "application/json" -Body $request
+Invoke-RestMethod "http://localhost:8001/jobs/$($job.job_id)"
+Invoke-RestMethod http://localhost:8001/jobs
+```
 
-The `coffee_daily_retraining` DAG is enabled automatically on first creation:
+- `POST /jobs` returns **202** with `job_id`, `request_id` and state immediately.
+- `GET /jobs/{id}` returns `queued`, `running`, `succeeded` or `failed`;
+  completed jobs contain `result` or `error`. Unknown jobs return 404.
+- `GET /jobs` lists the latest 50 jobs inside a `jobs` object.
+- Reusing a `request_id` with identical parameters returns the **same job**,
+  even after success/failure or API restart. Reusing it with different inputs
+  returns 409. Use a **new** key only when a new training run is intended.
+- An atomic constraint admits one queued/running job. Another distinct request
+  returns 409 instead of creating concurrent promotions.
+- The worker trains RandomForest, XGBoost and LightGBM using the production
+  pipeline and full configured benchmark. It selects maximum test R-squared,
+  logs candidates to MLflow and promotes `champion`.
+- Each job runs in its own ML process, without blocking the training HTTP
+  server or inference service. MLflow records `training_job_id` for inspection.
+- Queued jobs survive restart. Interrupted running jobs become explicit
+  failures, **not automatic retries**: the champion may have been promoted
+  before the interruption. Inspect MLflow before submitting a new key.
+- The worker has a singleton filesystem lock and readiness heartbeat; the
+  training API reports 503 if that worker is not ready. Training has a
+  30-minute worker limit. Job status remains queryable during worker outages.
 
-- **Schedule:** `0 2 * * *`, daily at **02:00 Europe/Budapest**.
-  The timetable uses the timezone rather than a fixed UTC offset and follows
-  Airflow's daylight-saving rules. On the spring clock-change day, the
-  nonexistent 02:00 slot moves forward; on the autumn change, the repeated
-  clock hour does not intentionally create a second daily training interval.
-- **No historical catchup:** `catchup=False`. The explicit trigger timetable
-  runs only the latest due daily slot when starting/restarting after downtime,
-  rather than replaying each missed day. A fresh stack can therefore train
-  once immediately for the latest due slot; subsequent runs follow the daily
-  schedule. Keep Docker and the host running for scheduled executions.
-- **Concurrency:** one active DAG run/task. The API's existing lock also
-  rejects concurrent manual training with HTTP 409.
-- **Workflow:** check `GET /health`, call `POST /train` once with
-  `{"test_size":0.2,"random_state":42}`, then verify the serving champion via
-  `GET /model`. It reuses the API's configured benchmark, trains all three
-  candidates, logs to the existing container MLflow volume and promotes the
-  highest test R-squared model, just like manual API/dashboard training.
-  This is a daily retraining **pipeline**, not three separate daily schedules.
-- **Visibility:** the Airflow task log and small XCom identify the MLflow
-  training run, model name and version. Full candidate metrics and history
-  remain in MLflow. Select **Refresh status** in Streamlit after completion.
-- **Failure safety:** connection errors, HTTP 409/5xx, invalid JSON and
-  champion mismatches fail visibly. Automatic retries are disabled because
-  `/train` is synchronous and not idempotent: a timed-out request may still
-  complete on the API. The HTTP read timeout is 30 minutes, task timeout
-  35 minutes, DAG-run timeout 40 minutes. A failed daily run is not silently
-  skipped or repeatedly resubmitted.
+The job queue is owned by one logical training service. It is a single-node
+SQLite implementation, not a distributed broker. Keep one worker replica.
+For multi-host training, replace it with a service-owned database/broker and
+distributed claiming; serving can already be deployed independently.
 
-Open <http://localhost:8080>. The local username is `admin`; the password is
-generated at runtime, never committed. Retrieve it locally:
+## Dashboard and monitoring
+
+Open <http://localhost:8501>. The **Training** tab submits jobs, lists persisted
+states/errors and displays candidate comparison when a selected job succeeds.
+It does not hold a long-running training request open. **Refresh status**
+updates job/model state. A failed submission retains its request key for safe
+retry with the same parameters. Job history remains available after browser
+restart. No polling refresh creates another training job.
+
+The inference/monitoring tab still supports UTF-8 CSV uploads (max. 20 MB),
+prediction CSV downloads, embedded Evidently reports and HTML/JSON downloads.
+Only the 31 training features are required; extra columns are ignored by
+inference. `record_id` is echoed. Uploading known `coffee_quality_score` labels
+also enables current-data regression evaluation.
+
+- Reference: the bundled full training benchmark; current: uploaded data.
+- Drift excludes IDs, target, `quality_grade` and `price_usd_per_kg`, matching
+  training. Numeric/categorical mappings come from the reference.
+- Missing values remain in quality reports. Entirely empty columns are
+  excluded from drift with a warning and JSON `coffee_monitoring` metadata.
+- The slider controls the fraction of eligible drifted features required
+  for dataset drift (default 50%), not a per-feature p-value. Evidently's
+  default per-feature tests/thresholds are used.
+- At least two rows are required; small batches give unreliable drift
+  estimates (UI warns below 100 rows).
+- Regression reports evaluate finite labeled **current** rows only, with
+  missing-label exclusions counted. At least two labels are required for the
+  report; the inference API returns only MAE/RMSE for one finite label.
+- The full training reference is not an independent performance test set.
+  Upload held-out/production labels for unbiased evaluation.
+- Reports can contain sample values. Treat them as application data; no
+  reports are uploaded to Evidently Cloud. Container telemetry is disabled.
+
+Changing the upload, reference file or champion clears stale inference/report
+results. The inference service loads the exact registry version selected for
+the request and notices champion updates without restarting.
+
+## Airflow daily retraining
+
+The existing `coffee_daily_retraining` DAG remains **daily 02:00
+Europe/Budapest**, `catchup=False`, one active run/task. Airflow follows local
+daylight-saving transitions (one daily slot); downtime does not replay each
+missed day, but the latest due slot may run on startup.
+
+The DAG now submits `POST /jobs`, polls `GET /jobs/{id}` and verifies the
+champion through the inference API. Its request key is a deterministic hash
+of the Airflow run ID, so clearing/retrying that same run cannot duplicate the
+training job. A new manually triggered DAG run creates a new key.
+Failed jobs/polling timeouts fail visibly. No automatic task retries are set.
+The polling deadline is 30 minutes, task timeout 35, DAG-run timeout 40.
+
+Open <http://localhost:8080>; username `admin`. Retrieve the generated password:
 
 ```powershell
 docker compose exec airflow cat /opt/airflow/state/simple_auth_manager_passwords.json.generated
-```
-
-In the UI, locate `coffee_daily_retraining`, inspect its schedule and task
-logs, and use **Trigger DAG** for an explicit manual run. Alternatively:
-
-```powershell
-docker compose exec airflow airflow dags list
 docker compose exec airflow airflow dags list-import-errors
 docker compose exec airflow airflow dags trigger coffee_daily_retraining
-docker compose logs -f airflow
+docker compose logs -f airflow training-worker
 ```
 
-Manual triggers and clearing failed tasks can create extra training runs.
-Before retrying a failed task, inspect API health and MLflow to confirm the
-previous request did not already complete; exactly-once execution across
-network failures is not guaranteed by the existing API. Avoid manual
-dashboard training around the scheduled time. Pausing the DAG in the UI is
-persisted across restarts; auto-enable applies only on initial DAG creation.
-To change the schedule, edit
-`airflow/dags/coffee_daily_retraining.py` and rebuild the Airflow service.
-The host notebooks/artifacts are not mounted into Airflow.
+Airflow remains single-node standalone for local use. Pausing its DAG is
+persisted; auto-enable applies only to first DAG creation. Stop it independently
+with `docker compose stop airflow`.
 
-To disable the scheduler temporarily without affecting the other services:
+## Deployment boundaries and scaling
+
+Rebuild/update individual services without bundling the others:
 
 ```powershell
-docker compose stop airflow
-docker compose start airflow
+docker compose up -d --build --no-deps api
+docker compose up -d --build --no-deps training-api training-worker
+docker compose up -d --build --no-deps dashboard
 ```
 
-Airflow's standalone UI and scheduler are health-checked together. If the
-Rancher Desktop UI is running but Windows `docker info` still fails, verify
-the Docker/Moby backend and Windows Docker integration: a running desktop
-application alone does not guarantee that the Windows named pipe is usable.
+Inference needs only MLflow HTTP and its ML libraries: no training job database
+or artifact volume. Multiple inference replicas can use the same central
+registry; each caches its own champion. Compose's fixed published port prevents
+`--scale api=2` as written; use a reverse proxy/load balancer and remove the
+fixed host port for replicas. Training remains a single promoter.
 
-## What monitoring means
+This is service-oriented/microservice deployment, **not** a public production
+platform: API authentication, TLS, managed backups, load balancing and
+multi-host job control still require deployment infrastructure. Do not expose
+the local unauthenticated ML endpoints publicly.
 
-- **Reference:** the entire `data/coffee_value_benchmark.csv` bundled with
-  the image; **current:** the uploaded CSV. Rebuild to change the bundled data.
-- Data drift and quality use only training features. IDs, the target,
-  `quality_grade` and `price_usd_per_kg` are excluded, matching training.
-  Numeric/categorical types are explicitly mapped from the reference.
-  Missing values remain visible to the quality report; they are not imputed
-  by the dashboard. The model still uses its trained imputers for inference.
-  Entirely empty columns in either dataset cannot be statistically tested:
-  they remain in the quality report, are excluded from drift, and are listed
-  in an explicit warning and the JSON `coffee_monitoring` metadata.
-- Evidently uses its default per-feature drift tests and thresholds.
-  The slider controls the **fraction of eligible drifted features** required to
-  declare dataset drift (default 50%), not a per-feature p-value.
-- At least two rows are required for drift reports. Small batches have
-  low statistical reliability; the UI warns below 100 rows.
-- Regression is evaluated on labeled **current** rows only, not against
-  predictions on the training reference. Missing labels are excluded and
-  their count is reported. Invalid numeric/infinite values are rejected.
-  Without labels, drift is not evidence that prediction accuracy declined.
-- The reference is not an independent test set. For unbiased performance
-  measurement, upload held-out or production data with observed labels.
-- Reports can contain data distributions and example values. Treat the
-  persisted volume and downloaded reports as application data. No report
-  is uploaded to Evidently Cloud. Telemetry is disabled in the Docker image.
+## Local compatibility and tests
 
-The API also supports a single labeled inference row: MAE/RMSE are returned,
-but R-squared is omitted because it is undefined for one observation.
+The original local `api_mlflow/main.py` API retains synchronous `/train` through
+a backward-compatible facade over the extracted training/serving modules.
+The production CLI and notebooks remain supported. It is deliberately **not**
+the application used by the microservice Compose stack.
 
-## Run locally without Docker
-
-The existing virtual environment can be used. From this directory:
+For the split services without Docker, set `MLFLOW_TRACKING_URI` to a running
+central MLflow HTTP service, `COFFEE_JOBS_PATH` to a writable service-owned
+SQLite path, and `COFFEE_DATA_PATH` to the benchmark. Start these in separate
+terminals with the API package on `PYTHONPATH`:
 
 ```powershell
-& C:\Users\bordasm\.venv\Scripts\python.exe -m pip install -r docker\requirements.txt
-& C:\Users\bordasm\.venv\Scripts\python.exe api_mlflow\main.py
+$env:PYTHONPATH = (Resolve-Path api_mlflow).Path
+python -m uvicorn coffee_mlflow_api.training_app:app --port 8001
+python -m coffee_mlflow_api.worker
+python -m uvicorn coffee_mlflow_api.inference_app:app --port 8000
 ```
 
-In another PowerShell terminal:
-
-```powershell
-$env:COFFEE_API_URL = "http://127.0.0.1:56"
-& C:\Users\bordasm\.venv\Scripts\python.exe -m streamlit run dashboard\app.py --server.maxUploadSize=20
-```
-
-Unlike Docker, this local API uses the existing host artifact store.
-The existing API binds to port 56 locally; the container uses port 8000.
-Start the local MLflow UI as described in [the API guide](api_mlflow/README.md).
-
-| Environment variable | Purpose / default |
-| --- | --- |
-| `COFFEE_DATA_PATH` | API training and dashboard reference CSV; bundled benchmark |
-| `COFFEE_ARTIFACTS_DIR` | API artifact directory; project `artifacts` |
-| `MLFLOW_TRACKING_URI` | API tracking/registry URI; SQLite in the artifact directory |
-| `COFFEE_API_URL` | Dashboard API address; `http://127.0.0.1:56` locally |
-| `COFFEE_REPORTS_DIR` | Dashboard report output; `artifacts/reports` locally |
-| `COFFEE_MLFLOW_UI_URL` | Browser-visible MLflow link; `http://localhost:5000` |
-
-Set environment variables before starting the relevant process. The
-dashboard intentionally calls the REST API rather than loading models or
-opening the MLflow database itself.
-
-## Validation
-
-Tests use standard-library `unittest` and the installed application packages.
-They generate actual Evidently reports and train a small model in a temporary
-MLflow store; they do not train into or modify the original artifacts.
+For Streamlit set `COFFEE_API_URL=http://127.0.0.1:8000` and
+`COFFEE_TRAINING_URL=http://127.0.0.1:8001`. Its report/reference path overrides
+remain `COFFEE_REPORTS_DIR`, `COFFEE_DATA_PATH`; the browser MLflow link is
+`COFFEE_MLFLOW_UI_URL`.
 
 ```powershell
 & C:\Users\bordasm\.venv\Scripts\python.exe -m pip install -r tests\requirements.txt
 & C:\Users\bordasm\.venv\Scripts\python.exe -m unittest discover -s tests -v
-& C:\Users\bordasm\.venv\Scripts\python.exe -m pycodestyle dashboard tests api_mlflow\coffee_mlflow_api\config.py api_mlflow\coffee_mlflow_api\service.py
 docker compose config --quiet
-```
-
-The standard Windows test suite also validates the Airflow HTTP training
-helper (including failure/no-retry behavior) using a real local HTTP test
-server, without importing Airflow. Actual DAG parsing, winter/summer timezone
-scheduling, clock changes and no-historical-backfill behavior are checked
-in the Linux Airflow image:
-
-```powershell
-docker compose build airflow
 docker compose run --rm --no-deps airflow python -m unittest discover -s /opt/airflow/tests -v
 ```
 
-After startup, verify the real container stack:
+Tests cover legacy training behavior, real Evidently outputs, Streamlit,
+job concurrency/durability/idempotency, API boundaries and asynchronous Airflow
+polling. Existing artifacts are not used as writable test storage.
+
+For an **isolated test project only**, the end-to-end smoke test submits real
+training, checks idempotency, predicts labeled rows and downloads HTTP artifacts:
 
 ```powershell
-Invoke-RestMethod http://localhost:8000/health
-Invoke-WebRequest http://localhost:8501/_stcore/health
-Invoke-WebRequest http://localhost:5000/health
-Invoke-RestMethod -Method Post http://localhost:8000/train -ContentType "application/json" -Body '{"test_size":0.2,"random_state":42}'
-curl.exe -f -F "file=@data\coffee_inference_sample.csv" http://localhost:8000/predict
+Get-Content tests\microservice_smoke.py -Raw |
+    docker compose exec -T training-api python -
 ```
 
-Stop/start the stack and repeat `GET /model` to verify the champion persists.
-If Docker reports a Hyper-V socket/backend timeout, start or repair the
-Linux container engine before building. If package downloads fail, check
-the machine's pip/proxy settings rather than changing repository code.
+It persists a test request key in the test job volume. Repeating it after service
+restart verifies the original job without retraining; a newer champion, such as
+one promoted by Airflow, is checked separately.
+
+***********************************************************************************
+
+This project was developed with the help of GitHub Copilot.

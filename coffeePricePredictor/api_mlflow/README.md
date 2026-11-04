@@ -119,8 +119,11 @@ curl.exe -F "file=@..\data\coffee_inference_sample.csv" http://127.0.0.1:56/pred
 
 See the [application guide](../README.md) for the Docker Compose stack,
 Streamlit dashboard, Evidently drift/quality/regression reports and tests.
-The container API listens on port 8000 and uses a separate persistent
-MLflow volume; the existing Windows artifacts and notebooks remain unchanged.
+The Docker stack now runs `inference_app` on port 8000 (no `/train`) and
+`training_app` on port 8001 with asynchronous `/jobs` and a separate worker.
+They use central MLflow HTTP with PostgreSQL and server-owned artifacts.
+This guide's synchronous API remains supported only for local legacy use.
+See the application guide for request-id deduplication, polling and migration.
 
 `COFFEE_DATA_PATH`, `COFFEE_ARTIFACTS_DIR` and `MLFLOW_TRACKING_URI`
 can override the API paths at process startup. Without them, the existing

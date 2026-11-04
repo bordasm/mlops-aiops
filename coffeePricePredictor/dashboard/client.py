@@ -35,8 +35,8 @@ class CoffeeApiClient:
             )
         except requests.Timeout as error:
             raise ApiError(
-                "API timeout. Training may still be running; refresh the "
-                "status before submitting another request."
+                "API timeout. A job may already be accepted or running; "
+                "refresh status or retry with the same request_id."
             ) from error
         except requests.ConnectionError as error:
             raise ApiError(f"Cannot connect to the API: {error}") from error

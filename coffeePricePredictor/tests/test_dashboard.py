@@ -162,7 +162,7 @@ class ClientTests(unittest.TestCase):
     @patch("client.requests.request")
     def test_timeout_is_explicit(self, request: Mock) -> None:
         request.side_effect = requests.Timeout("timeout")
-        with self.assertRaisesRegex(ApiError, "may still be running"):
+        with self.assertRaisesRegex(ApiError, "already be accepted"):
             CoffeeApiClient("http://api").request("POST", "/train")
 
     @patch("client.requests.request")
@@ -221,11 +221,13 @@ class StreamlitTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             with patch.dict(os.environ, {"COFFEE_REPORTS_DIR": directory}):
-                request.return_value = {
-                    "status": "ok",
-                    "champion_model_available": False,
-                    "training_in_progress": False,
-                }
+                request.side_effect = lambda method, path, **kwargs: (
+                    {"jobs": []} if path == "/jobs" else {
+                        "status": "ok",
+                        "champion_model_available": False,
+                        "training_in_progress": False,
+                    }
+                )
                 app = AppTest.from_file(str(ROOT / "dashboard" / "app.py"))
                 app.run(timeout=30)
                 self.assertEqual(len(app.exception), 0)
@@ -243,6 +245,12 @@ class StreamlitTests(unittest.TestCase):
 
         metrics = {"rmse": 1.0, "mae": 0.8, "r2": 0.9}
         trained = {"train": metrics, "test": metrics, "fit_time_seconds": 0.1}
+        result = {
+            "message": "Training completed", "training_run_id": "parent",
+            "best_model": "RandomForest",
+            "all_models": {"RandomForest": trained},
+        }
+        jobs = []
 
         def respond(method, path, **kwargs):
             if path == "/health":
@@ -255,11 +263,14 @@ class StreamlitTests(unittest.TestCase):
                     "model_name": "RandomForest", "model_version": "1",
                     "model_run_id": "candidate", "metrics": {"test_r2": 0.9},
                 }
-            return {
-                "message": "Training completed", "training_run_id": "parent",
-                "best_model": "RandomForest",
-                "all_models": {"RandomForest": trained},
-            }
+            if path == "/jobs" and method == "POST":
+                job = {
+                    "job_id": "job-1", "status": "queued",
+                    "created_at": "now", "error": None, "result": None,
+                }
+                jobs.append(job)
+                return job
+            return {"jobs": jobs}
 
         request.side_effect = respond
         with tempfile.TemporaryDirectory() as directory:
@@ -272,6 +283,9 @@ class StreamlitTests(unittest.TestCase):
                 )
                 train_button.click().run(timeout=30)
                 self.assertEqual(len(app.exception), 0)
+                self.assertEqual(jobs[0]["status"], "queued")
+                jobs[0].update(status="succeeded", result=result)
+                app.run(timeout=30)
                 self.assertIn("training_result", app.session_state)
                 self.assertTrue(any(
                     "test_r2" in frame.value.columns
