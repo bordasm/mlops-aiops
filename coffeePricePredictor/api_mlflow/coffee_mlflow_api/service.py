@@ -653,9 +653,17 @@ class CoffeeQualityMlflowService:
         target = pd.to_numeric(
             dataframe[config.TARGET_COLUMN], errors="coerce"
         )
-        mask = target.notna().to_numpy()
+        mask = np.isfinite(target).to_numpy()
         if not mask.any():
             return {}
+        if mask.sum() == 1:
+            absolute_error = float(
+                np.abs(target[mask].to_numpy() - predictions[mask])[0]
+            )
+            return {
+                "eval_rmse": absolute_error,
+                "eval_mae": absolute_error,
+            }
         return {
             f"eval_{name}": value
             for name, value in evaluate_predictions(

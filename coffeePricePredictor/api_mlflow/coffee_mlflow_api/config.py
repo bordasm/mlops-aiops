@@ -1,12 +1,21 @@
 """Configuration values for the MLflow based coffee quality REST API."""
 
+import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-DATA_PATH = PROJECT_ROOT / "data" / "coffee_value_benchmark.csv"
-ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
-TRACKING_URI = "sqlite:///" + (ARTIFACTS_DIR / "mlflow.db").as_posix()
+DATA_PATH = Path(os.environ.get(
+    "COFFEE_DATA_PATH",
+    PROJECT_ROOT / "data" / "coffee_value_benchmark.csv",
+)).resolve()
+ARTIFACTS_DIR = Path(os.environ.get(
+    "COFFEE_ARTIFACTS_DIR", PROJECT_ROOT / "artifacts",
+)).resolve()
+TRACKING_URI = os.environ.get(
+    "MLFLOW_TRACKING_URI",
+    "sqlite:///" + (ARTIFACTS_DIR / "mlflow.db").as_posix(),
+)
 MLRUNS_DIR = ARTIFACTS_DIR / "mlruns"
 
 TRAINING_EXPERIMENT_NAME = "coffee-quality-training"

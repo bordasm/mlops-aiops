@@ -99,6 +99,10 @@ with the predictions CSV as an artifact. Sample file:
 The champion alias is checked on every request, so a model registered
 by the training notebook is used without restarting the API.
 
+For one finite labeled row, only MAE and RMSE are returned; R-squared
+requires at least two labels. Missing or infinite labels are excluded
+from evaluation.
+
 ```powershell
 curl.exe -F "file=@..\data\coffee_inference_sample.csv" http://127.0.0.1:56/predict
 ```
@@ -110,3 +114,14 @@ curl.exe -F "file=@..\data\coffee_inference_sample.csv" http://127.0.0.1:56/pred
 - `413` – uploaded file is larger than 20 MB
 - `422` – invalid training parameters
 - `503` – no champion model registered yet (call `POST /train` first)
+
+## Docker and monitoring dashboard
+
+See the [application guide](../README.md) for the Docker Compose stack,
+Streamlit dashboard, Evidently drift/quality/regression reports and tests.
+The container API listens on port 8000 and uses a separate persistent
+MLflow volume; the existing Windows artifacts and notebooks remain unchanged.
+
+`COFFEE_DATA_PATH`, `COFFEE_ARTIFACTS_DIR` and `MLFLOW_TRACKING_URI`
+can override the API paths at process startup. Without them, the existing
+local paths and SQLite store are preserved.

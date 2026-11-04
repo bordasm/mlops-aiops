@@ -1,0 +1,97 @@
+name: coffee-quality
+
+x-coffee-service: &coffee-service
+  image: coffee-quality:local
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  init: true
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *coffee-service
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - mlflow-data:/app/artifacts
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=30)"
+      interval: 30s
+      timeout: 40s
+      start_period: 60s
+      retries: 5
+
+  mlflow:
+    <<: *coffee-service
+    command:
+      - mlflow
+      - server
+      - --backend-store-uri
+      - sqlite:////app/artifacts/mlflow.db
+      - --default-artifact-root
+      - file:///app/artifacts/mlruns
+      - --no-serve-artifacts
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --workers
+      - "1"
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - mlflow-data:/app/artifacts
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=10)"
+      interval: 30s
+      timeout: 15s
+      retries: 5
+
+  dashboard:
+    <<: *coffee-service
+    command:
+      - python
+      - -m
+      - streamlit
+      - run
+      - dashboard/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.maxUploadSize=20
+      - --server.headless=true
+    environment:
+      COFFEE_API_URL: http://api:8000
+      COFFEE_REPORTS_DIR: /app/reports
+      COFFEE_MLFLOW_UI_URL: http://localhost:5000
+    ports:
+      - "127.0.0.1:8501:8501"
+    volumes:
+      - monitoring-reports:/app/reports
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=10)"
+      interval: 30s
+      timeout: 15s
+      retries: 5
+
+volumes:
+  mlflow-data:
+  monitoring-reports:

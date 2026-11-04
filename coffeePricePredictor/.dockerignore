@@ -1,0 +1,17 @@
+**
+!api_mlflow/
+!api_mlflow/**
+!productionReadyCode/
+!productionReadyCode/src/
+!productionReadyCode/src/**
+!dashboard/
+!dashboard/**
+!docker/
+!docker/**
+!data/
+!data/coffee_value_benchmark.csv
+!data/coffee_inference_sample.csv
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.ruff_cache/
