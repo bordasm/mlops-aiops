@@ -267,6 +267,38 @@ Tests cover legacy training behavior, real Evidently outputs, Streamlit,
 job concurrency/durability/idempotency, API boundaries and asynchronous Airflow
 polling. Existing artifacts are not used as writable test storage.
 
+On the `cloud_run` branch, GitHub Actions also runs the application tests,
+PEP 8 checks, Compose configuration validation, image builds and native
+Airflow DAG tests. A manually dispatched run on `cloud_run` publishes the
+inference, training, dashboard, MLflow and Airflow images to Artifact Registry
+only after these checks pass. The separately published images are tagged with
+the Git commit SHA, not `latest`.
+
+### Image publication prerequisites
+
+- Enable the Artifact Registry API and create an existing **Docker-format**
+  `mlsecops` repository in the region specified by the `GCP_REGION` secret.
+- Configure GitHub Actions secrets `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_SA_KEY`
+  (the service-account JSON key) and `SERVICE_NAME`. The service account needs
+  Artifact Registry Writer on the repository and permission to read its
+  metadata. `SERVICE_NAME` is a lowercase image-name prefix; for example, the
+  inference image is `REGION-docker.pkg.dev/PROJECT/mlsecops/PREFIX-inference:SHA`.
+- Create the GitHub environment `cloud-run-publication` and configure required
+  reviewers and branch restrictions if approval is desired. An environment
+  name alone does not enforce approval. Publication uses a service-account key;
+  protect and rotate it, and prefer Workload Identity Federation when available.
+- GitHub requires a manually dispatchable workflow to exist on the repository's
+  default branch before it can be run manually. Until it is present there,
+  this branch-only workflow cannot be manually dispatched via GitHub. Once it
+  exists there, choose `cloud_run` as the ref when starting the workflow.
+
+This workflow **does not deploy to Cloud Run**. The images are the existing
+local Compose images: SQLite jobs, a continuously running worker, local report
+and artifact volumes, network addresses and authentication still need a
+Cloud Run-compatible redesign. Airflow is intended to move to Cloud Composer,
+not run as the standalone Airflow image on Cloud Run. No public access or
+Cloud Run infrastructure is configured by image publication.
+
 For an **isolated test project only**, the end-to-end smoke test submits real
 training, checks idempotency, predicts labeled rows and downloads HTTP artifacts:
 
